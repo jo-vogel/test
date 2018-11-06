@@ -131,3 +131,6 @@ plot(spi_12, 'Wichita, SPI-12')
 -calculate boxplots for the fractions of area under concurrent events
 -use Kolmogorov-Smirnov test on CDFs
 (-calculate autocorrelation of time series of fraction of area under concurrent events)
+
+
+# some changes
