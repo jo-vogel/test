@@ -1,0 +1,133 @@
+# Replication of Mazdiyasni & AghaKouchak 2015
+
+
+setwd("Z:/Promotion/Data")
+
+library(ncdf4) # package for netcdf manipulation
+library(raster) # package for raster manipulation
+library(rgdal) # package for geospatial analysis
+library(ggplot2) # package for plotting
+
+# Data: see paper source
+Prcp.1999 <- nc_open("gridded_obs.monthly.Prcp.1999.nc")
+Prcp.1998 <- nc_open("gridded_obs.monthly.Prcp.1998.nc")
+Prcp.1997 <- nc_open("gridded_obs.monthly.Prcp.1997.nc")
+
+Temp.1999 <- nc_open("gridded_obs.daily.Tmax.1999.nc")
+Temp.1998 <- nc_open("gridded_obs.daily.Tmax.1998.nc")
+Temp.1997 <- nc_open("gridded_obs.daily.Tmax.1997.nc")
+Temp.1996 <- nc_open("gridded_obs.daily.Tmax.1996.nc")
+
+lon <- ncvar_get(Prcp.1999, "longitude")
+lat <- ncvar_get(Prcp.1999, "latitude", verbose = F)
+t_Temp <- ncvar_get(Temp.1999, "time")
+t_Prec <- ncvar_get(Prcp.1999, "time")
+
+prcp.array.99 <- ncvar_get(Prcp.1999, "Prcp") # store the data in a 3-dimensional array
+prcp.array.98 <- ncvar_get(Prcp.1998, "Prcp")
+prcp.array.97 <- ncvar_get(Prcp.1997, "Prcp")
+temp.array.99 <- ncvar_get(Temp.1999, "Tmax")
+temp.array.98 <- ncvar_get(Temp.1998, "Tmax")
+temp.array.97 <- ncvar_get(Temp.1997, "Tmax")
+temp.array.96 <- ncvar_get(Temp.1996, "Tmax")
+
+
+
+# 
+prcp.slice <- prcp.array.99[, , 1] # get the first time slice
+prcp.slice12 <- prcp.array.99[, , 12] # get the last time slice
+temp.slice <- temp.array.99[, , 1] # get the first time slice
+temp.slice <- temp.array.99[, , 365] # get the last time slice
+temp.slice <- temp.array.96[, , 366] # get the last time slice: leap year
+
+
+# Rasterize
+r <- raster(t(prcp.slice12), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat), crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+r <- raster(t(temp.slice), xmn=min(lon), xmx=max(lon), ymn=min(lat), ymx=max(lat), crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+r <- flip(r, direction='y')
+
+# Plot
+plot(r)
+
+boxplot(r)
+
+r_brick <- brick(prcp.array.99, xmn=min(lat), xmx=max(lat), ymn=min(lon), ymx=max(lon), crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+temp_brick <- brick(temp.array.99, xmn=min(lat), xmx=max(lat), ymn=min(lon), ymx=max(lon), crs=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs+ towgs84=0,0,0"))
+# note that you may have to play around with the transpose (the t() function) and flip() before the data are oriented correctly. In this example, the netcdf file recorded latitude on the X and longitude on the Y, so both a transpose and a flip in the y direction were required.
+r_brick <- flip(t(r_brick), direction='y')
+temp_brick <- flip(t(temp_brick), direction='y')
+series <- extract(r_brick, SpatialPoints(cbind(-100,40)), method='simple')
+temp_series <- extract(temp_brick, SpatialPoints(cbind(-100,40)), method='simple')
+df <- data.frame(day= seq(from=1, to=12, by=1), Tmax=t(series))
+temp_df <- data.frame(day= seq(from=1, to=365, by=1), Tmax=t(temp_series))
+
+ggplot(data=temp_df, aes(x=day, y=Tmax, group=1)) +
+  geom_line() + # make this a line plot
+  ggtitle("Time series") +     # Set title
+  theme_bw() # use the black and white theme
+
+boxplot(temp_df[,2])
+
+# heatwave example for one pixel:
+sorted_temp <- sort(temp_df[,2])
+percentile90 <- sorted_temp[329] # 90th percentile: 365*0.9=328.5 (look up how exactly it is defined)
+count=0
+heat=0
+for (i in 1:365) {
+ if (temp_df[i,2] > percentile90)
+ {count <- count+1
+  if (count==5){
+    heat <- heat+1
+    count <- 0
+    print(i)
+  }
+ if (temp_df[i+1,2] < percentile90){ # wenn der nächste Tag nicht extrem ist, ist die Bedingung für Hitzeperiode nicht erfüllt und es geht von vorn los
+  count <- 0 
+  }
+ }
+}
+
+# drought example for one pixel:
+# library("spi")
+library("SPEI") # usable for Processing large datasets
+# http://joewheatley.net/wp-content/uploads/2010/03/SPI.txt
+
+spi_prec <- spi(df[,2],1)
+spi_prec12 <- spi(df[,2],12)
+par(mfrow=c(2,1))
+plot(spi_prec, 'Prec, SPI-1')
+plot(spi_prec12, 'Prec, SPI-12')
+
+data(spi_data)
+write.table(spi_data,file="spi.txt",quote=FALSE,row.names=TRUE)
+spi(3,"spi.txt",1963,2010)
+spi(7,"spi.txt",1963,2010,"Standardized Precipitation Index - Rio Grande do Norte State",1,"years","months")
+
+# Load data
+data(wichita)
+
+# Convert to a ts (time series) object for convenience
+wichita <- ts(wichita[,-c(1,2)], end=c(2011,10), frequency=12)
+plot(wichita)
+
+# One and tvelwe-months SPI
+spi_1 <- spi(wichita[,'PRCP'], 1)
+spi_12 <- spi(wichita[,'PRCP'], 12)
+
+par(mfrow=c(2,1))
+plot(spi_1, 'Wichita, SPI-1')
+plot(spi_12, 'Wichita, SPI-12')
+
+
+
+# What has to be done?
+-extract heatwaves
+-extract meteorological droughts
+-calculate percent change in concurrent heatwaves and droughts
+
+-apply Mann-Kendall-Test on percent change in concurrent heatwaves and droughts
+-apply the Cramér-von-Mises change point detection on percent change in concurrent heatwaves and droughts
+-calculate the CDFs (fractions of area under concurrent events)
+-calculate boxplots for the fractions of area under concurrent events
+-use Kolmogorov-Smirnov test on CDFs
+(-calculate autocorrelation of time series of fraction of area under concurrent events)
